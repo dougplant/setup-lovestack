@@ -2,7 +2,10 @@
 # todo:
 # - move the httpd and mariadb systemctl enable calls to the end of the script, generally biased against having them run if they're not fully set up
 # - decide what to do about APC (or other op code cache) which is not currently being installed
-
+# - set up the systemctl for solr
+# - install the ezfind extension
+# - install the stock db schema, and the lovestack patches?
+# - do some good and standard mysql perf tweaks
 
 # escape for MySQL, just don't want to break any queries, not looking for injection attacks or anything
 stringGlobal=""
@@ -59,9 +62,8 @@ echo "file-system-user database password:" $databaseUserPassword
 echo "root-user database password:" $rootUserPassword
 echo "the full domain name:" $domainName
 
-
-if false; then
-
+# install some utilities
+yum -y install tree
 
 # install Apache
 yum -y install httpd
@@ -149,7 +151,8 @@ yum -y install git
 cd /var/www/html
 git clone https://github.com/mugoweb/ezpublish-legacy.git $domainName
 
-# install ezfind ... not sure if we're going to make it work or not ...
+# install ezfind
+yum -y install java
 cd /var/www/html/$domainName/extension
 git clone https://github.com/mugoweb/ezfind.git ezfind
 
@@ -171,12 +174,6 @@ ln -s -T /var/eep/eep.php eep
 sed -i 's#\.\/\.eepdata#\/tmp\/\.eepdata#' /var/eep/eepSetting.php
 sed -i 's#"\.\/"#"\/tmp\/"#' /var/eep/eepSetting.php
 
-
-
-fi
-
-
-
 # set up virtual host
 cd /var/www/html/$domainName
 eep use ezroot .
@@ -185,11 +182,14 @@ eep kb vhost > $domainName.conf
 sed -i "s#<<<servername>>>#$domainName#" /etc/httpd/conf.d/$domainName.conf
 sed -i "s#apache_error\.log\.txt#apache_error\.log#" /etc/httpd/conf.d/$domainName.conf
 
-# hack around SELinux 
-# NOTE I am not sure that this is correct ...
+# config SELinux to allow HTTPd access to the subtree
 semanage fcontext -a -t httpd_sys_rw_content_t '/var/www/html(/.*)?'
 restorecon -R /var/www/html
 
+# open the http and https ports in the firewall
+sudo firewall-cmd --zone=public --add-service=https --permanent
+sudo firewall-cmd --zone=public --add-service=http --permanent
+sudo firewall-cmd --reload
 
 
 
