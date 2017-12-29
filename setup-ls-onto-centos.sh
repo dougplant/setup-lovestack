@@ -2,10 +2,35 @@
 # todo:
 # - move the httpd and mariadb systemctl enable calls to the end of the script, generally biased against having them run if they're not fully set up
 # - decide what to do about APC (or other op code cache) which is not currently being installed
+# - setup the ezfind extension; activate it and secure it
 # - set up the systemctl for solr
-# - install the ezfind extension
 # - install the stock db schema, and the lovestack patches?
 # - do some good and standard mysql perf tweaks
+# - review setting up Varnish by default
+
+# other extensions:
+# https://github.com/ezsystems/ezstarrating.git
+# https://github.com/ezsystems/ezdemo.git
+# https://github.com/ezsystems/ezmultiupload
+# https://github.com/ezsystems/eztags.git
+# https://github.com/ezsystems/ezscriptmonitor.git
+# https://github.com/ezsystems/ezgmaplocation.git
+# https://github.com/ezsystems/ezodf.git
+# https://github.com/ezsystems/ezie.git
+# https://github.com/ezsystems/ezautosave.git
+# https://github.com/ezsystems/ezsi.git
+# https://github.com/ezsystems/ezsurvey.git
+# https://github.com/ezsystems/ezmbpaex.git (automatic password expiry)
+# https://github.com/ezsystems/ezstyleeditor.git
+# https://github.com/ezsystems/ezlightbox.git	
+
+# other packages:
+# https://github.com/ezsystems/ezflow.git
+# https://github.com/ezsystems/ezwt.git
+# https://github.com/ezsystems/ezwebin.git
+# https://github.com/ezsystems/ezcomments.git
+
+#--------------------------------------------------------------------------------------------------------
 
 # escape for MySQL, just don't want to break any queries, not looking for injection attacks or anything
 stringGlobal=""
@@ -17,43 +42,338 @@ function escapeForSQL() {
     stringGlobal=$string
 }
 
+# install some utilities
+function install_utilities() {
+	yum -y install tree
+	yum -y install git
+	#yum -y install gcc
+}
+
+function install_apache() {
+	# install Apache
+	yum -y install httpd
+
+	# confirm apache installation: test that it is serving content, at least via localhost
+	# note that this test is not idempotent
+	yum -y install wget
+	echo "hello world" > /var/www/html/index.html
+	systemctl start httpd
+	apacheTest=$(wget localhost -O- -q)
+	if [ "$apacheTest" != "hello world" ]; then
+	  echo "Apache installation failed. Exiting."
+	  systemctl stop httpd
+	  exit 1
+	else
+	  echo "Apache is OK, at least serving content via localhost"
+	fi
+	# stop apache because security
+	systemctl stop httpd
+
+	# make Apache restartable
+	systemctl enable httpd
+}
+
+function install_mariadb() {
+	# install maria DB for CentOs 7
+	yum -y install mariadb-server mariadb
+
+	# start the server
+	systemctl start mariadb
+
+	# check the status of the server
+	mysqlTest=$(systemctl status mariadb)
+	if [[ $mysqlTest =~ "Started MariaDB database server" ]]; then
+	    echo "Maria DB is running ok"
+	else
+	    echo "Maria DB installation failed. Exiting."
+	    systemctl stop mariadb
+	    exit 1
+	fi
+
+	# strip out the demo, and other insecure default stuff in mysql
+	# also, setup the root database user password
+	mysql -u root <<-EOF
+	UPDATE mysql.user SET Password=PASSWORD('$rootUserPassword') WHERE User='root';
+	DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+	DELETE FROM mysql.user WHERE User='';
+	DELETE FROM mysql.db WHERE Db='test' OR Db='test_%';
+	FLUSH PRIVILEGES;
+	EOF
+
+	# make mariadb restartable
+	systemctl enable mariadb
+}
+
+function install_php() {
+	# set up PHP, to get the minimum version required by lovestack, this is some extra work
+	# we wind up with, PHP v 5.6 (5.6.32 in testing)
+	# used instructions from here: https://rpms.remirepo.net/wizard/
+
+	yum -y install php php-mysql
+	yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+	yum -y install http://rpms.remirepo.net/enterprise/remi-release-7.rpm
+	yum -y install yum-utils
+	yum-config-manager -y --enable remi-php56
+	yum -y update
+
+	# replace the line starting with ;date.timezone =
+	# capture the "date.timezone =" part
+	# and replace the whole line with date.timezone = America/Vancouver
+	sed -i 's#^\;\(date.timezone\s*=\s*\).*$#\1 America/Vancouver#' /etc/php.ini
+
+	yum -y install php-gd
+	yum -y install php-xml
+	yum -y install php-mbstring
+	yum -y install ImageMagick
+	yum -y install php-pear
+	yum -y install php-devel
+}
+
+function install_eep() {
+	# set up eep
+	cd /var
+	git clone https://github.com/mugoweb/eep.git eep
+	cd /usr/bin
+	ln -s -T /var/eep/eep.php eep
+	# eep settings:
+	sed -i 's#\.\/\.eepdata#\/tmp\/\.eepdata#' /var/eep/eepSetting.php
+	sed -i 's#"\.\/"#"\/tmp\/"#' /var/eep/eepSetting.php
+}
+
+function configure_security() {
+	# config SELinux to allow HTTPd access to the subtree
+	semanage fcontext -a -t httpd_sys_rw_content_t '/var/www/html(/.*)?'
+	restorecon -R /var/www/html
+
+	# open the http and https ports in the firewall
+	sudo firewall-cmd --zone=public --add-service=https --permanent
+	sudo firewall-cmd --zone=public --add-service=http --permanent
+	sudo firewall-cmd --reload
+}
+
+function install_ezcomponents() {
+	# install ezcomponents
+	pear channel-discover components.ez.no
+	pear install -a ezc/eZComponents
+}
+
+function install_lovestack() {
+	cd /var/www/html
+	git clone https://github.com/mugoweb/ezpublish-legacy.git $domainName
+
+	# install ezfind, might as well determine to always install ezfind
+	# also because there is a related SQL patch that also has to be installed
+	yum -y install java
+	cd /var/www/html/$domainName/extension
+	git clone https://github.com/mugoweb/ezfind.git ezfind
+
+	# set up permissions; this is copied from the ezp install wizard
+	cd /var/www/html/$domainName
+	sudo chmod -R ug+rwx design extension settings settings/siteaccess var var/cache var/cache/ini var/log
+	sudo chown -R apache:apache design extension settings settings/siteaccess var var/cache var/cache/ini var/log
+
+	cd /var/www/html/$domainName
+	sudo chmod -R ug+rwx var/log
+	sudo chown -R apache:apache var/log
+}
+
+function install_ezdbschema() {
+	cd /var/www/html/$domainName
+
+	# set up the ez publish database
+	mysql -u root --password=$rootUserPassword -e "use mysql; create database $fileSystemUserName charset utf8"
+	mysql -u root --password=$rootUserPassword -e "use mysql; CREATE USER '$fileSystemUserName'@'localhost' IDENTIFIED BY '$databaseUserPassword'"
+	mysql -u root --password=$rootUserPassword -e "use mysql; GRANT ALL PRIVILEGES ON $fileSystemUserName.* TO '$fileSystemUserName'@'localhost';"
+
+	cd /var/www/html/$domainName
+	# setup basic database schema, and then apply needed patches
+	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./kernel/sql/mysql/kernel_schema.sql
+	# lovestack patches 
+	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./update/database/mysql/lovestack/1.sql
+	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./update/database/mysql/lovestack/2.sql
+	# push in the ezp default dataset ... is the default admin user admin/publish?
+	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./kernel/sql/common/cleandata.sql
+	# push in the schema changes for ezfind/solr
+	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./extension/ezfind/sql/mysql/mysql.sql
+
+}
+
+function install_virtualhost() {
+	# set up virtual host
+	cd /var/www/html/$domainName
+	eep use ezroot .
+	cd /etc/httpd/conf.d
+	eep kb vhost > $domainName.conf
+	sed -i "s#<<<servername>>>#$domainName#" /etc/httpd/conf.d/$domainName.conf
+	sed -i "s#apache_error\.log\.txt#apache_error\.log#" /etc/httpd/conf.d/$domainName.conf
+}
+
+# set up the settings files and siteaccesses
+function install_settingsfiles() {
+
+cd /var/www/html/$domainName
+mkdir -p ./settings/override
+mkdir -p ./settings/siteaccess/site
+mkdir -p ./settings/siteaccess/manage
+
+# --- --- --- --- --- --- --- --- --- 
+cat > ./settings/override/site.ini.append.php <<OverrideSiteIni
+<?php /* #?ini charset="utf-8"?
+
+# override site.ini, installed vi $0
+
+[DatabaseSettings]
+DatabaseImplementation=ezmysqli
+Server=localhost
+Port=
+User=$fileSystemUserName
+Password=$databaseUserPassword
+Database=$fileSystemUserName
+Charset=
+Socket=disabled
+
+[SiteAccessSettings]
+# turn off the setup wizard
+CheckValidity=false
+AvailableSiteAccessList[]
+AvailableSiteAccessList[]=site
+AvailableSiteAccessList[]=manage
+MatchOrder=uri
+HostMatchMapItems[]
+
+[RegionalSettings]
+Locale=eng-US
+TextTranslation=disabled
+
+[ExtensionSettings]
+ActiveExtensions[]
+ActiveExtensions[]=ezfind
+ActiveExtensions[]=ezjscore
+ActiveExtensions[]=ezoe
+ActiveExtensions[]=ezformtoken
+
+[SiteSettings]
+DefaultAccess=site
+SiteList[]
+SiteList[]=site
+SiteList[]=manage
+RootNodeDepth=1
+
+[Session]
+SessionNameHandler=custom
+
+[UserSettings]
+LogoutRedirect=/
+
+[DesignSettings]
+DesignLocationCache=enabled
+
+[RegionalSettings]
+TranslationSA[]
+TranslationSA[eng]=Eng
+
+[FileSettings]
+VarDir=var/lovestack
+
+[MailSettings]
+Transport=sendmail
+AdminEmail=hi@mugo.ca
+EmailSender=hi@mugo.ca
+
+[EmbedViewModeSettings]
+AvailableViewModes[]
+AvailableViewModes[]=embed
+AvailableViewModes[]=embed-inline
+InlineViewModes[]
+InlineViewModes[]=embed-inline
+*/ ?\>
+OverrideSiteIni
+# --- --- --- --- --- --- --- --- --- 
+
+# --- --- --- --- --- --- --- --- --- 
+cat > ./settings/override/image.ini.append.php <<OverrideImageIni
+<?php /* #?ini charset="utf-8"?
+
+[ImageMagick]
+IsEnabled=true
+ExecutablePath=/usr/bin
+Executable=convert
+*/ ?>
+OverrideImageIni
+# --- --- --- --- --- --- --- --- --- 
+
+# --- --- --- --- --- --- --- --- --- 
+cat > ./settings/siteaccess/contentstructuremenu.ini.append.php <<ManageContentStructureMenu
+<?php /* #?ini charset="utf-8"?
+
+[TreeMenu]
+Dynamic=enabled
+ShowClasses[]
+ShowClasses[]=article
+ShowClasses[]=comment
+ShowClasses[]common_ini_settings
+ShowClasses[]=file
+ShowClasses[]=folder
+ShowClasses[]=image
+ShowClasses[]=link
+ShowClasses[]=template_look
+ShowClasses[]=user
+ShowClasses[]=user_group
+
+*/ ?>
+ManageContentStructureMenu
+# --- --- --- --- --- --- --- --- --- 
+
+
+
+
+rm -f var/cache/ini/*
+}
+
+# ---------------------------------------------------------------------------------------------
+
 # get the various inputs needed from the user:
 
 # get the name of the filesystem and db user
-fileSystemUserName=""
-while [ "$fileSystemUserName" == "" ]; do
-    read -p "Enter username (for db account and fs ownership): " fileSystemUserName
-done
+fileSystemUserName="tester"
+read -p "Enter username (for db account and fs ownership) [$fileSystemUserName]: " inputString
+if [ "" != "$inputString" ]; then
+    fileSystemUserName=$inputString
+fi
 
 # get password for the (single) filesystem user, this will be how to SSH into the host
-fileSystemUserPassword=""
-while [ "$fileSystemUserPassword" == "" ]; do
-    read -p "Enter fs password for this user:" fileSystemUserPassword
-done
+fileSystemUserPassword="pwdfs"
+read -p "Enter fs password for this user [$fileSystemUserPassword]: " inputString
+if [ "" != "$inputString" ]; then
+    fileSystemUserPassword=$inputString
+fi
 escapeForSQL $fileSystemUserPassword
 fileSystemUserPassword=$stringGlobal
 
 # get password for the database use (so as to not use root)
-databaseUserPassword=""
-while [ "$databaseUserPassword" == "" ]; do
-    read -p "Enter db password for this user:" databaseUserPassword
-done
+databaseUserPassword="pwddb"
+read -p "Enter db password for this user [$databaseUserPassword]: " inputString
+if [ "" != "$inputString" ]; then
+    databaseUserPassword=$inputString
+fi
 escapeForSQL $databaseUserPassword
 databaseUserPassword=$stringGlobal
 
 # get password for the root database password
-rootUserPassword=""
-while [ "$rootUserPassword" == "" ]; do
-    read -p "Enter db password for the root user:" rootUserPassword
-done
+rootUserPassword="rootroot"
+read -p "Enter db password for the root user [$rootUserPassword]:" inputString
+if [ "" != "$inputString" ]; then
+    rootUserPassword=$inputString
+fi
 escapeForSQL $rootUserPassword
 rootUserPassword=$stringGlobal
 
 # get intended domain name
-domainName=""
-while [ "$domainName" == "" ]; do
-    read -p "Enter the full domain name for this host:" domainName
-done
+domainName="tester.test.com"
+read -p "Enter the full domain name for this host [$domainName]:" inputString
+if [ "" != "$inputString" ]; then
+    domainName=$inputString
+fi
 
 # just for debugging purposes, dump the various input values we've captured
 echo "file-system-user name:" $fileSystemUserName
@@ -62,147 +382,27 @@ echo "file-system-user database password:" $databaseUserPassword
 echo "root-user database password:" $rootUserPassword
 echo "the full domain name:" $domainName
 
-# install some utilities
-yum -y install tree
+#install_utilities
 
-# install Apache
-yum -y install httpd
+#install_apache
 
-# confirm apache installation: test that it is serving content, at least via localhost
-yum -y install wget
-echo "hello world" > /var/www/html/index.html
-systemctl start httpd
-apacheTest=$(wget localhost -O- -q)
-if [ "$apacheTest" != "hello world" ]; then
-  echo "Apache installation failed. Exiting."
-  systemctl stop httpd
-  exit 1
-else
-  echo "Apache is OK, at least serving content via localhost"
-fi
-# stop apache because security
-systemctl stop httpd
+#install_mariadb
 
-# make Apache restartable
-systemctl enable httpd
+#install_php
 
-# install maria DB for CentOs 7
-yum -y install mariadb-server mariadb
+#configure_security
 
-# start the server
-systemctl start mariadb
+#install_eep
 
-# check the status of the server
-mysqlTest=$(systemctl status mariadb)
-if [[ $mysqlTest =~ "Started MariaDB database server" ]]; then
-    echo "Maria DB is running ok"
-else
-    echo "Maria DB installation failed. Exiting."
-    systemctl stop mariadb
-    exit 1
-fi
-# make mariadb restartable
-systemctl enable mariadb
+#install_ezcomponents
 
-# set up the ez publish database
-mysql -u root -e "use mysql; create database $fileSystemUserName charset utf8"
-mysql -u root -e "use mysql; CREATE USER '$fileSystemUserName'@'localhost' IDENTIFIED BY '$databaseUserPassword'"
-mysql -u root -e "use mysql; GRANT ALL PRIVILEGES ON $fileSystemUserName.* TO '$fileSystemUserName'@'localhost';"
+#install_lovestack
 
-# strip out the demo, and other insecure default stuff in mysql
-# also, setup the root database user password
-mysql -u root <<-EOF
-UPDATE mysql.user SET Password=PASSWORD('$rootUserPassword') WHERE User='root';
-DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
-DELETE FROM mysql.user WHERE User='';
-DELETE FROM mysql.db WHERE Db='test' OR Db='test_%';
-FLUSH PRIVILEGES;
-EOF
+#install_ezdbschema
 
-# set up PHP, to get the minimum version required by lovestack, this is some extra work
-# we wind up with, PHP v 5.6 (5.6.32 in testing)
-# used instructions from here: https://rpms.remirepo.net/wizard/
+#install_virtualhost
 
-yum -y install php php-mysql
-yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-yum -y install http://rpms.remirepo.net/enterprise/remi-release-7.rpm
-yum -y install yum-utils
-yum-config-manager -y --enable remi-php56
-yum -y update
+install_settingsfiles
 
-# replace the line starting with ;date.timezone =
-# capture the "date.timezone =" part
-# and replace the whole line with date.timezone = America/Vancouver
-sed -i 's#^\;\(date.timezone\s*=\s*\).*$#\1 America/Vancouver#' /etc/php.ini
-
-yum -y install php-gd
-yum -y install php-xml
-yum -y install php-mbstring
-yum -y install ImageMagick
-yum -y install php-pear
-yum -y install php-devel
-yum -y install gcc
-
-# install ezcomponents
-pear channel-discover components.ez.no
-pear install -a ezc/eZComponents
-
-yum -y install git
-cd /var/www/html
-git clone https://github.com/mugoweb/ezpublish-legacy.git $domainName
-
-# install ezfind
-yum -y install java
-cd /var/www/html/$domainName/extension
-git clone https://github.com/mugoweb/ezfind.git ezfind
-
-# set up permissions; this is more or less copied from the ezp install wizard
-cd /var/www/html/$domainName
-sudo chmod -R ug+rwx design extension settings settings/siteaccess var var/cache var/cache/ini var/log
-sudo chown -R apache:apache design extension settings settings/siteaccess var var/cache var/cache/ini var/log
-
-cd /var/www/html/$domainName
-sudo chmod -R ug+rwx var/log
-sudo chown -R apache:apache var/log
-
-# set up eep
-cd /var
-git clone https://github.com/mugoweb/eep.git eep
-cd /usr/bin
-ln -s -T /var/eep/eep.php eep
-# eep settings:
-sed -i 's#\.\/\.eepdata#\/tmp\/\.eepdata#' /var/eep/eepSetting.php
-sed -i 's#"\.\/"#"\/tmp\/"#' /var/eep/eepSetting.php
-
-# set up virtual host
-cd /var/www/html/$domainName
-eep use ezroot .
-cd /etc/httpd/conf.d
-eep kb vhost > $domainName.conf
-sed -i "s#<<<servername>>>#$domainName#" /etc/httpd/conf.d/$domainName.conf
-sed -i "s#apache_error\.log\.txt#apache_error\.log#" /etc/httpd/conf.d/$domainName.conf
-
-# config SELinux to allow HTTPd access to the subtree
-semanage fcontext -a -t httpd_sys_rw_content_t '/var/www/html(/.*)?'
-restorecon -R /var/www/html
-
-# open the http and https ports in the firewall
-sudo firewall-cmd --zone=public --add-service=https --permanent
-sudo firewall-cmd --zone=public --add-service=http --permanent
-sudo firewall-cmd --reload
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#php bin/php/ezcache.php --clear-all --allow-root-user
 
