@@ -286,14 +286,63 @@ AvailableViewModes[]=embed
 AvailableViewModes[]=embed-inline
 InlineViewModes[]
 InlineViewModes[]=embed-inline
+
+
+[DebugSettings]
+## DebugByIP=enabled
+## DebugIPList[]
+## DebugIPList[]=127.0.0.1
+DebugOutput=enabled
+DebugRedirection=disabled
+
+[TemplateSettings]
+# Use either enabled to see which template files are loaded or disabled to supress debug
+Debug=enabled
+ShowXHTMLCode=disabled
+
+# If enabled will add a table with templates used to render a page.
+# DebugOutput should be enabled too.
+ShowUsedTemplates=enabled
+# Determines whether the templates should be compiled to PHP code, by enabling this the loading
+# and parsing of templates is omitted and template processing is significantly reduced.
+# Note: The first time the templates are compiled it will take a long time, use the
+#       bin/php/eztc.php script to prepare all your templates.
+TemplateCompile=disabled
+# Controls all template base caching mechanisms, if disabled they will never be
+# used.
+# The elements currently controlled by this is:
+# - cache-block
+TemplateCache=disabled
+# Controls if development is enabled or not.
+# When enabled the system will perform more checks like modification time on
+# compiled vs source file and will reduce need for clearing template compiled
+# files.
+# Note: Live sites should not have this enabled since it increases file access
+#       and can be slower.
+# Note: When switching this setting the template compiled files must be cleared.
+DevelopmentMode=enabled
+
+[ContentSettings]
+# Whether to use view caching or not
+ViewCaching=disabled
+
+
 */ ?\>
 OverrideSiteIni
 # --- --- --- --- --- --- --- --- --- 
 
 # --- --- --- --- --- --- --- --- --- 
+cat > ./settings/override/i18n.ini.append.php <<OverrideI18nIni
+<?php /* #?ini charset="utf-8"?
+[CharacterSettings]
+Charset=utf-8
+*/ ?\>
+OverrideI18nIni
+# --- --- --- --- --- --- --- --- --- 
+
+# --- --- --- --- --- --- --- --- --- 
 cat > ./settings/override/image.ini.append.php <<OverrideImageIni
 <?php /* #?ini charset="utf-8"?
-
 [ImageMagick]
 IsEnabled=true
 ExecutablePath=/usr/bin
@@ -303,7 +352,18 @@ OverrideImageIni
 # --- --- --- --- --- --- --- --- --- 
 
 # --- --- --- --- --- --- --- --- --- 
-cat > ./settings/siteaccess/contentstructuremenu.ini.append.php <<ManageContentStructureMenu
+cat > ./settings/siteaccess/manage/content.ini.append.php <<ManageContentIni
+<?php /* #?ini charset="utf-8"?
+[VersionView]
+AvailableSiteDesignList[]
+AvailableSiteDesignList[]=site
+AvailableSiteDesignList[]=admin
+*/ ?\>
+ManageContentIni
+# --- --- --- --- --- --- --- --- --- 
+
+# --- --- --- --- --- --- --- --- --- 
+cat > ./settings/siteaccess/manage/contentstructuremenu.ini.append.php <<ManageContentStructureMenu
 <?php /* #?ini charset="utf-8"?
 
 [TreeMenu]
@@ -324,7 +384,80 @@ ShowClasses[]=user_group
 ManageContentStructureMenu
 # --- --- --- --- --- --- --- --- --- 
 
+# --- --- --- --- --- --- --- --- --- 
+cat > ./settings/siteaccess/manage/ezoe.ini.append.php <<ManageEzoeIni
+<?php /* #?ini charset="utf-8"?
+[VersionView]
+AvailableSiteDesignList[]
+AvailableSiteDesignList[]=site
+AvailableSiteDesignList[]=admin
+*/ ?\>
+ManageEzoeIni
+# --- --- --- --- --- --- --- --- --- 
 
+# --- --- --- --- --- --- --- --- --- 
+cat > ./settings/siteaccess/manage/icon.ini.append.php <<ManageIconIni
+<?php /* #?ini charset="utf-8"?
+[IconSettings]
+Theme=crystal-admin
+Size=normal
+*/ ?\>
+ManageIconIni
+# --- --- --- --- --- --- --- --- --- 
+
+# --- --- --- --- --- --- --- --- --- 
+cat > ./settings/siteaccess/manage/site.ini.append.php <<ManageSiteIni
+<?php /* #?ini charset="utf-8"?
+[SiteSettings]
+SiteName=LoveStack Barebone Site
+SiteURL=$domainName
+DefaultPage=content/dashboard
+LoginPage=custom
+
+[UserSettings]
+RegistrationEmail=
+
+[SiteAccessSettings]
+RequireUserLogin=true
+RelatedSiteAccessList[]=site
+RelatedSiteAccessList[]=manage
+ShowHiddenNodes=true
+
+[DesignSettings]
+SiteDesign=admin
+AdditionalSiteDesignList[]
+AdditionalSiteDesignList[]=admin
+
+[RegionalSettings]
+Locale=eng-US
+ContentObjectLocale=eng-US
+ShowUntranslatedObjects=enabled
+SiteLanguageList[]=eng-US
+TextTranslation=disabled
+
+[FileSettings]
+VarDir=var/lovestack
+
+[ContentSettings]
+CachedViewPreferences[full]=admin_navigation_content=1;admin_children_viewmode=list;admin_list_limit=1
+TranslationList=
+
+[MailSettings]
+AdminEmail=hi@mugo.ca
+EmailSender=hi@mugo.ca
+
+?\>
+ManageSiteIni
+# --- --- --- --- --- --- --- --- --- 
+
+# --- --- --- --- --- --- --- --- --- 
+cat > ./settings/siteaccess/manage/viewcache.ini.append.php <<ManageViewcacheIni
+<?php /* #?ini charset="utf-8"?
+[ViewCacheSettings]
+SmartCacheClear=enabled
+*/ ?\>
+ManageViewcacheIni
+# --- --- --- --- --- --- --- --- --- 
 
 
 rm -f var/cache/ini/*
@@ -404,5 +537,11 @@ echo "the full domain name:" $domainName
 
 install_settingsfiles
 
-#php bin/php/ezcache.php --clear-all --allow-root-user
+cd /var/www/html/$domainName/
+php bin/php/ezcache.php --clear-all --allow-root-user
+php bin/php/ezpgenerateautoloads.php
+
+
+
+
 
