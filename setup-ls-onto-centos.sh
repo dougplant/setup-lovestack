@@ -4,6 +4,7 @@
 # - decide what to do about APC (or other op code cache) which is not currently being installed
 # - setup the ezfind extension; activate it and secure it
 # - set up the systemctl for solr
+# - set up ezflow
 # - install the stock db schema, and the lovestack patches?
 # - do some good and standard mysql perf tweaks
 # - review setting up Varnish by default
@@ -220,7 +221,7 @@ mkdir -p ./settings/siteaccess/manage
 cat > ./settings/override/site.ini.append.php <<OverrideSiteIni
 <?php /* #?ini charset="utf-8"?
 
-# override site.ini, installed vi $0
+# override site.ini, installed via $0
 
 [DatabaseSettings]
 DatabaseImplementation=ezmysqli
@@ -408,6 +409,9 @@ ManageIconIni
 # --- --- --- --- --- --- --- --- --- 
 cat > ./settings/siteaccess/manage/site.ini.append.php <<ManageSiteIni
 <?php /* #?ini charset="utf-8"?
+
+# manage site.ini, installed via $0
+
 [SiteSettings]
 SiteName=LoveStack Barebone Site
 SiteURL=$domainName
@@ -459,8 +463,78 @@ SmartCacheClear=enabled
 ManageViewcacheIni
 # --- --- --- --- --- --- --- --- --- 
 
+# --- --- --- --- --- --- --- --- --- 
+# this override.ini is sufficient to get us started
+mv ./settings/siteaccess/base/override.ini.append ./settings/siteaccess/site/override.ini.append.php
+# ... and these others too, I guess
+mv ./settings/siteaccess/base/forum.ini ./settings/siteaccess/site/forum.ini.append.php
+mv ./settings/siteaccess/base/image.ini.append ./settings/siteaccess/site/image.ini.append.php
+mv ./settings/siteaccess/base/toolbar.ini.append ./settings/siteaccess/site/toolbar.ini.append.php
+# --- --- --- --- --- --- --- --- --- 
 
-rm -f var/cache/ini/*
+# --- --- --- --- --- --- --- --- --- 
+# build the site.ini for the public side
+cat > ./settings/siteaccess/site/site.ini.append.php <<SiteSiteIni
+<?php /* #?ini charset="utf-8"?
+
+# site site.ini, installed via $0
+
+[Session]
+SessionNamePerSiteAccess=disabled
+
+[SiteSettings]
+LoginPage=embedded
+SiteName=$domainName
+SiteURL=$domainName
+AdditionalLoginFormActionURL=http://$domainName/manage/user/login
+DefaultPage=/content/view/full/2
+IndexPage=/content/view/full/2
+ErrorHandler=displayerror
+
+[SiteAccessSettings]
+RequireUserLogin=false
+RelatedSiteAccessList[]
+RelatedSiteAccessList[]=site
+RelatedSiteAccessList[]=manage
+ShowHiddenNodes=false
+
+[DesignSettings]
+SiteDesign=mysite
+AdditionalSiteDesignList[]
+#AdditionalSiteDesignList[]=ezflow
+AdditionalSiteDesignList[]=base
+# this is possibly redundant since "standard" is included in the default setting "StandardDesign"
+AdditionalSiteDesignList[]=standard
+
+[RegionalSettings]
+Locale=eng-US
+ContentObjectLocale=eng-US
+ShowUntranslatedObjects=disabled
+SiteLanguageList[]
+SiteLanguageList[]=eng-US
+TextTranslation=disabled
+
+[FileSettings]
+VarDir=var/site
+
+[ContentSettings]
+TranslationList=
+
+[MailSettings]
+AdminEmail=hi@mugo.ca
+EmailSender=hi@mugo.ca
+*/ ?\>
+SiteSiteIni
+# --- --- --- --- --- --- --- --- --- 
+
+# --- --- --- --- --- --- --- --- --- 
+# delete a bunch of garbage design and settings stuff
+rm -rf ./design/plain/
+rm -rf ./settings/siteaccess/plain
+rm -rf ./settings/siteaccess/base
+rm -rf ./settings/siteaccess/mysite
+# --- --- --- --- --- --- --- --- --- 
+
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -536,6 +610,7 @@ echo "the full domain name:" $domainName
 #install_virtualhost
 
 install_settingsfiles
+rm -f ./var/cache/ini/*
 
 cd /var/www/html/$domainName/
 php bin/php/ezcache.php --clear-all --allow-root-user
