@@ -45,6 +45,7 @@ function escapeForSQL() {
 
 # install some utilities
 function install_utilities() {
+	yum -y install vim
 	yum -y install tree
 	yum -y install git
 	#yum -y install gcc
@@ -122,6 +123,9 @@ function install_php() {
 	# and replace the whole line with date.timezone = America/Vancouver
 	sed -i 's#^\;\(date.timezone\s*=\s*\).*$#\1 America/Vancouver#' /etc/php.ini
 
+	#yum -y install php-curl
+	# i have no idea if this is right, nor if it is actually required to make ezfind work
+	yum install php-pear-Net-Curl.noarch
 	yum -y install php-gd
 	yum -y install php-xml
 	yum -y install php-mbstring
@@ -150,6 +154,10 @@ function configure_security() {
 	sudo firewall-cmd --zone=public --add-service=https --permanent
 	sudo firewall-cmd --zone=public --add-service=http --permanent
 	sudo firewall-cmd --reload
+
+	# open port for solr/ezfind
+	firewall-cmd --zone=public --add-port=8983/tcp --permanent
+	firewall-cmd --reload
 }
 
 function install_ezcomponents() {
@@ -167,6 +175,26 @@ function install_lovestack() {
 	yum -y install java
 	cd /var/www/html/$domainName/extension
 	git clone https://github.com/mugoweb/ezfind.git ezfind
+
+# --- --- --- --- --- --- --- --- --- 
+cat > /etc/systemd/system/solr.service <<SolrSystemD
+[Unit]
+Description=Apache SOLR
+After=syslog.target network.target remote-fs.target nss-lookup.target
+ 
+[Service]
+WorkingDirectory=/var/www/html/$domainName/extension/ezfind/java
+PIDFile=solr.pid
+User=root
+ExecStart=/usr/bin/java -Dezfind -jar start.jar
+ExecReload=/bin/kill -s HUP \$MAINPID
+ExecStop=/bin/kill -s QUIT \$MAINPID
+PrivateTmp=true
+ 
+[Install]
+WantedBy=multi-user.target
+SolrSystemD
+# --- --- --- --- --- --- --- --- --- 
 
 	# set up permissions; this is copied from the ezp install wizard
 	cd /var/www/html/$domainName
@@ -597,13 +625,13 @@ echo "the full domain name:" $domainName
 
 #install_php
 
-#configure_security
+configure_security
 
 #install_eep
 
 #install_ezcomponents
 
-#install_lovestack
+install_lovestack
 
 #install_ezdbschema
 
