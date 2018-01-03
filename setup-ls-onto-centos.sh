@@ -1,5 +1,6 @@
 # - script to fully setup a CentOS 7 instance with the Mugo LoveStack
 # todo:
+# - update /etc/php.ini with: variables_order = "GPCS" ... need to insert E at the start of that list
 # - move the httpd and mariadb systemctl enable calls to the end of the script, generally biased against having them run if they're not fully set up
 # - decide what to do about APC (or other op code cache) which is not currently being installed
 # - setup the ezfind extension; activate it and secure it
@@ -220,8 +221,21 @@ function install_ezdbschema() {
 	# lovestack patches 
 	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./update/database/mysql/lovestack/1.sql
 	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./update/database/mysql/lovestack/2.sql
-	# push in the ezp default dataset ... is the default admin user admin/publish?
+
+	# push in the ezp default dataset ... is the default admin user admin/publish? ... yes, yes it is
 	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./kernel/sql/common/cleandata.sql
+
+
+
+        # crudely move all the data to be eng-US, away from eng-GB ... will this work?
+	#cp ./kernel/sql/common/cleandata.sql /tmp/cleandata-eng-us.sql
+	#sed -i "s#eng-GB#eng-US#" /tmp/cleandata-eng-us.sql
+	#mysql -u root --password=$rootUserPassword $fileSystemUserName < /tmp/cleandata-eng-us.sql
+
+
+
+
+
 	# push in the schema changes for ezfind/solr
 	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./extension/ezfind/sql/mysql/mysql.sql
 
@@ -625,15 +639,16 @@ echo "the full domain name:" $domainName
 
 #install_php
 
-configure_security
+#configure_security
 
 #install_eep
 
 #install_ezcomponents
 
-install_lovestack
+#install_lovestack
 
-#install_ezdbschema
+mysql -u root --password=$rootUserPassword -e "use mysql; drop database $fileSystemUserName"
+install_ezdbschema
 
 #install_virtualhost
 
@@ -643,8 +658,4 @@ rm -f ./var/cache/ini/*
 cd /var/www/html/$domainName/
 php bin/php/ezcache.php --clear-all --allow-root-user
 php bin/php/ezpgenerateautoloads.php
-
-
-
-
 
