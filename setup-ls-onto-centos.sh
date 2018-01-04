@@ -9,6 +9,11 @@
 # - install the stock db schema, and the lovestack patches?
 # - do some good and standard mysql perf tweaks
 # - review setting up Varnish by default
+# - in the case where we use the ezpackages to initialize the instance, there is the languages mess where eng-US and eng-UK coexist; 
+#   we want a simple way to fix this: (i) add a US translation for a content class based on the UK
+#                                    (ii) make the US translation the 'main'
+#                                   (iii) remove the UK translation
+
 
 # other extensions:
 # https://github.com/ezsystems/ezstarrating.git
