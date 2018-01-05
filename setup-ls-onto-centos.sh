@@ -152,7 +152,7 @@ function install_eep() {
 }
 
 function configure_security() {
-	# config SELinux to allow HTTPd access to the subtree
+	# config SELinux to allow HTTPd access to the file-system
 	semanage fcontext -a -t httpd_sys_rw_content_t '/var/www/html(/.*)?'
 	restorecon -R /var/www/html
 
@@ -164,6 +164,9 @@ function configure_security() {
 	# open port for solr/ezfind
 	firewall-cmd --zone=public --add-port=8983/tcp --permanent
 	firewall-cmd --reload
+
+	# enable ezp to see the Solr server
+	sudo setsebool httpd_can_network_connect=1
 }
 
 function install_ezcomponents() {
