@@ -13,7 +13,9 @@
 #   we want a simple way to fix this: (i) add a US translation for a content class based on the UK
 #                                    (ii) make the US translation the 'main'
 #                                   (iii) remove the UK translation
-
+# - tighten up the HTTPd SELinux access to the fs
+# - explore the use of acme to support short term HTTPS certs
+# - possibly: use eep to import the packages, then you can do the whole init process from the command line
 
 # other extensions:
 # https://github.com/ezsystems/ezstarrating.git
@@ -230,6 +232,11 @@ function install_ezdbschema() {
 	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./update/database/mysql/lovestack/1.sql
 	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./update/database/mysql/lovestack/2.sql
 
+	# push in the schema changes for ezfind/solr
+	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./extension/ezfind/sql/mysql/mysql.sql
+
+
+
 	# push in the ezp default dataset ... is the default admin user admin/publish? ... yes, yes it is
 	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./kernel/sql/common/cleandata.sql
 
@@ -239,14 +246,6 @@ function install_ezdbschema() {
 	#cp ./kernel/sql/common/cleandata.sql /tmp/cleandata-eng-us.sql
 	#sed -i "s#eng-GB#eng-US#" /tmp/cleandata-eng-us.sql
 	#mysql -u root --password=$rootUserPassword $fileSystemUserName < /tmp/cleandata-eng-us.sql
-
-
-
-
-
-	# push in the schema changes for ezfind/solr
-	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./extension/ezfind/sql/mysql/mysql.sql
-
 }
 
 function install_virtualhost() {
