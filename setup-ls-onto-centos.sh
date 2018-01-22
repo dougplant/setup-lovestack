@@ -1,20 +1,18 @@
 # - script to fully setup a CentOS 7 instance with the Mugo LoveStack
 # todo:
-# - update /etc/php.ini with: variables_order = "GPCS" ... need to insert E at the start of that list
+#   automate the translation of the content classes (now supported via eep)
+    translate content objects ... OR determine that there is a better way to get sample content in place
+
 # - move the httpd and mariadb systemctl enable calls to the end of the script, generally biased against having them run if they're not fully set up
 # - decide what to do about APC (or other op code cache) which is not currently being installed
-# - setup the ezfind extension; activate it and secure it
-# - set up the systemctl for solr
+# - secure ezfind/solr
 # - set up ezflow
-# - install the stock db schema, and the lovestack patches?
 # - do some good and standard mysql perf tweaks
 # - review setting up Varnish by default
 # - in the case where we use the ezpackages to initialize the instance, there is the languages mess where eng-US and eng-UK coexist; 
-#   we want a simple way to fix this: (i) add a US translation for a content class based on the UK
-#                                    (ii) make the US translation the 'main'
-#                                   (iii) remove the UK translation
 # - tighten up the HTTPd SELinux access to the fs
 # - explore the use of acme to support short term HTTPS certs
+    although this is going to be interesting in light of the difficulty in getting a fixed IP addr on the VM
 # - possibly: use eep to import the packages, then you can do the whole init process from the command line
 
 # other extensions:
@@ -130,6 +128,8 @@ function install_php() {
 	# capture the "date.timezone =" part
 	# and replace the whole line with date.timezone = America/Vancouver
 	sed -i 's#^\;\(date.timezone\s*=\s*\).*$#\1 America/Vancouver#' /etc/php.ini
+	# similarly, add E to the variables_order setting
+	sed -i 's#^\;\(variables_order\s*=\s*\).*$#\1 "EGPCS"#' /etc/php.ini
 
 	#yum -y install php-curl
 	# i have no idea if this is right, nor if it is actually required to make ezfind work
@@ -220,11 +220,19 @@ SolrSystemD
 function install_ezdbschema() {
 	cd /var/www/html/$domainName
 
-	# set up the ez publish database
-	mysql -u root --password=$rootUserPassword -e "use mysql; create database $fileSystemUserName charset utf8"
-	mysql -u root --password=$rootUserPassword -e "use mysql; CREATE USER '$fileSystemUserName'@'localhost' IDENTIFIED BY '$databaseUserPassword'"
-	mysql -u root --password=$rootUserPassword -e "use mysql; GRANT ALL PRIVILEGES ON $fileSystemUserName.* TO '$fileSystemUserName'@'localhost';"
+	# set up the ez publish database, create the database
+	mysql -u root --password=$rootUserPassword -e "CREATE DATABASE $fileSystemUserName CHARSET utf8;"
+	# remove any legacy users, then create the one that we want
+	mysql -u root --password=$rootUserPassword -e "DROP USER '$fileSystemUserName'@'localhost';"
+	mysql -u root --password=$rootUserPassword -e "CREATE USER '$fileSystemUserName'@'localhost' IDENTIFIED BY '$databaseUserPassword';"
+	# and give that user full access to the database
+	mysql -u root --password=$rootUserPassword -e "GRANT ALL PRIVILEGES ON $fileSystemUserName.* TO '$fileSystemUserName'@'localhost';"
+	mysql -u root --password=$rootUserPassword -e "FLUSH PRIVILEGES;"
 
+    
+    
+    
+    
 	cd /var/www/html/$domainName
 	# setup basic database schema, and then apply needed patches
 	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./kernel/sql/mysql/kernel_schema.sql
@@ -239,10 +247,11 @@ function install_ezdbschema() {
 
 	# push in the ezp default dataset ... is the default admin user admin/publish? ... yes, yes it is
 	mysql -u root --password=$rootUserPassword $fileSystemUserName < ./kernel/sql/common/cleandata.sql
+    # but this requires that you fix all the translations ... it's all in eng-GB, ffs
+    
 
 
-
-        # crudely move all the data to be eng-US, away from eng-GB ... will this work?
+    # crudely move all the data to be eng-US, away from eng-GB ... will this work? ... sure seems not to
 	#cp ./kernel/sql/common/cleandata.sql /tmp/cleandata-eng-us.sql
 	#sed -i "s#eng-GB#eng-US#" /tmp/cleandata-eng-us.sql
 	#mysql -u root --password=$rootUserPassword $fileSystemUserName < /tmp/cleandata-eng-us.sql
@@ -514,11 +523,25 @@ ManageViewcacheIni
 
 # --- --- --- --- --- --- --- --- --- 
 # this override.ini is sufficient to get us started
-mv ./settings/siteaccess/base/override.ini.append ./settings/siteaccess/site/override.ini.append.php
+if [ -e ./settings/siteaccess/base/override.ini.append ]
+then
+    mv ./settings/siteaccess/base/override.ini.append ./settings/siteaccess/site/override.ini.append.php
+fi
 # ... and these others too, I guess
-mv ./settings/siteaccess/base/forum.ini ./settings/siteaccess/site/forum.ini.append.php
-mv ./settings/siteaccess/base/image.ini.append ./settings/siteaccess/site/image.ini.append.php
-mv ./settings/siteaccess/base/toolbar.ini.append ./settings/siteaccess/site/toolbar.ini.append.php
+if [ -e ./settings/siteaccess/base/forum.ini ]
+then
+   mv ./settings/siteaccess/base/forum.ini ./settings/siteaccess/site/forum.ini.append.php
+fi
+
+if [ -e ./settings/siteaccess/base/image.ini.append ]
+then
+    mv ./settings/siteaccess/base/image.ini.append ./settings/siteaccess/site/image.ini.append.php
+fi
+    
+if [ -e ./settings/siteaccess/base/toolbar.ini.append ]
+then
+    mv ./settings/siteaccess/base/toolbar.ini.append ./settings/siteaccess/site/toolbar.ini.append.php
+fi
 # --- --- --- --- --- --- --- --- --- 
 
 # --- --- --- --- --- --- --- --- --- 
